@@ -258,14 +258,14 @@
                     <span class="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500"></span>
                     <h1 class="text-xs font-bold uppercase tracking-wider text-slate-600">선택 좌표 (소수점 4자리)</h1>
                 </div>
-                <span id="location-label" class="text-[11px] font-medium text-slate-500 truncate max-w-[175px]" title="선택된 지점">서울특별시청</span>
+                <span id="location-label" class="text-[11px] font-medium text-slate-500 truncate max-w-[175px]" title="선택된 지점">서울서초초등학교</span>
             </div>
 
             <!-- 통합 좌표 표시 및 원클릭 복사 버튼 -->
             <div class="flex items-center justify-between gap-2 bg-slate-900 text-white rounded-xl p-2.5 mb-2.5 shadow-inner">
                 <div class="flex flex-col pl-1 min-w-0">
                     <span class="text-[10px] text-slate-400 font-medium">우클릭 시 자동 복사됨</span>
-                    <span id="combined-coord" class="font-mono text-base sm:text-lg font-bold tracking-tight text-emerald-400 truncate">37.5665, 126.9780</span>
+                    <span id="combined-coord" class="font-mono text-base sm:text-lg font-bold tracking-tight text-emerald-400 truncate">37.4932, 127.0150</span>
                 </div>
                 <button 
                     type="button" 
@@ -292,7 +292,7 @@
                         <span>위도 (Lat)</span>
                         <span class="text-blue-600 opacity-0 group-hover:opacity-100 font-semibold transition-opacity">복사</span>
                     </div>
-                    <div id="lat-display" class="font-mono text-sm font-bold text-slate-800">37.5665</div>
+                    <div id="lat-display" class="font-mono text-sm font-bold text-slate-800">37.4932</div>
                 </button>
 
                 <button 
@@ -305,7 +305,7 @@
                         <span>경도 (Lng)</span>
                         <span class="text-blue-600 opacity-0 group-hover:opacity-100 font-semibold transition-opacity">복사</span>
                     </div>
-                    <div id="lng-display" class="font-mono text-sm font-bold text-slate-800">126.9780</div>
+                    <div id="lng-display" class="font-mono text-sm font-bold text-slate-800">127.0150</div>
                 </button>
             </div>
 
@@ -349,19 +349,7 @@
     <!-- 우측 상단 지도 레이어 & 거리 측정 토글 & 유틸리티 컨트롤 -->
     <div class="fixed top-4 right-4 z-[1000] flex flex-col gap-2 items-end pointer-events-none">
         <!-- 지도 스타일 스위처 (기본: OpenStreetMap.HOT) -->
-        <div class="bg-white/95 backdrop-blur-md shadow-lg rounded-2xl p-1.5 border border-slate-200/80 flex gap-1 pointer-events-auto">
-            <button type="button" onclick="setMapLayer('hot')" id="layer-hot" class="layer-btn bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
-                OpenStreetMap.HOT
-            </button>
-            <button type="button" onclick="setMapLayer('osm')" id="layer-osm" class="layer-btn text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
-                OSM 기본
-            </button>
-            <button type="button" onclick="setMapLayer('satellite')" id="layer-satellite" class="layer-btn text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
-                위성 지도
-            </button>
-        </div>
-
-        <!-- 거리 측정 토글 버튼 & 현재 위치 이동 버튼 -->
+        <!-- 거리 측정 토글 버튼 & 초기 위치(서초초) 복귀 & 현재 위치 이동 버튼 -->
         <div class="flex items-center gap-1.5 pointer-events-auto">
             <button 
                 type="button" 
@@ -374,6 +362,18 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M14 7h7v7"/>
                 </svg>
                 <span id="measure-toggle-label">거리 측정</span>
+            </button>
+
+            <button 
+                type="button" 
+                onclick="resetToDefaultLocation()" 
+                class="bg-white/95 hover:bg-blue-50 backdrop-blur-md shadow-lg rounded-xl px-2.5 py-2.5 border border-slate-200/80 text-slate-700 hover:text-blue-600 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                title="서울서초초등학교(초기 위치)로 복귀"
+            >
+                <svg class="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                </svg>
+                <span class="hidden sm:inline">서초초</span>
             </button>
 
             <button 
@@ -398,7 +398,7 @@
     <div class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900/90 backdrop-blur-md text-white text-xs px-4 py-2 rounded-full shadow-lg flex items-center gap-3 pointer-events-none max-w-[92vw] whitespace-nowrap">
         <div class="flex items-center gap-1.5">
             <span class="text-slate-400">커서:</span>
-            <span id="cursor-coord" class="font-mono font-semibold text-emerald-400">37.5665, 126.9780</span>
+            <span id="cursor-coord" class="font-mono font-semibold text-emerald-400">37.4932, 127.0150</span>
         </div>
         <span class="text-slate-600 hidden sm:inline">|</span>
         <span id="bottom-hint-text" class="text-slate-200 hidden sm:inline">지도 위 원하는 곳을 <strong class="text-white">마우스 오른쪽 클릭</strong>하면 소수점 4자리 좌표가 즉시 복사됩니다</span>
@@ -445,32 +445,15 @@
 
         function initCoordinateMapApp() {
             // ==========================================
-            // 1. 안전한 스토리지 헬퍼 (샌드박스 SecurityError 방지)
+            // 2. 상태 변수 초기화 (기본 위치: 서울서초초등학교, 확대 줌 17)
             // ==========================================
-            const memoryStorage = {};
-            const safeStorage = {
-                getItem: function(key) {
-                    try {
-                        return window.localStorage.getItem(key);
-                    } catch (e) {
-                        return Object.prototype.hasOwnProperty.call(memoryStorage, key) ? memoryStorage[key] : null;
-                    }
-                },
-                setItem: function(key, value) {
-                    memoryStorage[key] = String(value);
-                    try {
-                        window.localStorage.setItem(key, String(value));
-                    } catch (e) {
-                        // 제한된 iframe 환경에서는 메모리 저장소만 사용
-                    }
-                }
-            };
+            const DEFAULT_LAT = 37.4932;
+            const DEFAULT_LNG = 127.0150;
+            const DEFAULT_ZOOM = 17;
+            const DEFAULT_LABEL = '서울서초초등학교';
 
-            // ==========================================
-            // 2. 상태 변수 초기화
-            // ==========================================
-            let currentLat = 37.5665; // 서울특별시청 기본 위도
-            let currentLng = 126.9780; // 서울특별시청 기본 경도
+            let currentLat = DEFAULT_LAT; // 서울서초초등학교 기본 위도
+            let currentLng = DEFAULT_LNG; // 서울서초초등학교 기본 경도
             let currentFormat = 'comma_space';
             let copyHistory = [];
             let toastTimeout = null;
@@ -502,8 +485,8 @@
             // 3. Leaflet 지도 및 타일 레이어 초기화
             // ==========================================
             const map = L.map('map', {
-                center: [currentLat, currentLng],
-                zoom: 13,
+                center: [DEFAULT_LAT, DEFAULT_LNG],
+                zoom: DEFAULT_ZOOM,
                 zoomControl: false
             });
 
@@ -1208,6 +1191,17 @@
             // ==========================================
             // 10. 내 현재 위치 이동
             // ==========================================
+            // 10. 초기 위치(서울서초초등학교) 복귀 & 내 현재 위치 이동
+            // ==========================================
+            window.resetToDefaultLocation = function() {
+                if (isMeasureMode) {
+                    toggleMeasureMode(false);
+                }
+                map.setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
+                updateSelectedCoordinates(DEFAULT_LAT, DEFAULT_LNG, false, DEFAULT_LABEL);
+                showToast('초기 위치(' + DEFAULT_LABEL + ')로 이동했습니다.');
+            };
+
             window.locateUser = function() {
                 if (!navigator.geolocation) {
                     showToast('이 브라우저에서는 위치 조회를 지원하지 않습니다.');
@@ -1218,7 +1212,7 @@
                     function(pos) {
                         const lat = pos.coords.latitude;
                         const lng = pos.coords.longitude;
-                        map.setView([lat, lng], 16);
+                        map.setView([lat, lng], 17);
                         if (isMeasureMode) {
                             handleMeasureClick(L.latLng(lat, lng));
                         } else {
@@ -1234,7 +1228,7 @@
 
             // 초기 렌더링 완료 처리
             renderHistory();
-            updateSelectedCoordinates(currentLat, currentLng, false, '서울특별시청');
+            updateSelectedCoordinates(DEFAULT_LAT, DEFAULT_LNG, false, DEFAULT_LABEL);
         }
     </script>
 </body>
