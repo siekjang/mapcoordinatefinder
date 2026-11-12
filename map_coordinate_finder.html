@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>위도·경도 좌표 추출기 (OpenStreetMap.HOT)</title>
+    
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS (unpkg 기본 + cdnjs 폴백) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';" />
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        /* 기본 레이아웃 및 폰트 폴백 스타일 */
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif;
+            background-color: #e2e8f0;
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        /* 전체 화면 지도 컨테이너 */
+        #map {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            cursor: crosshair;
+            background-color: #e2e8f0;
+        }
+        /* Leaflet 기본 컨트롤 위치 및 스타일 미세 조정 */
+        .leaflet-control-zoom {
+            border: none !important;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14) !important;
+            border-radius: 14px !important;
+            overflow: hidden;
+            margin-right: 16px !important;
+            margin-bottom: 58px !important;
+        }
+        .leaflet-control-zoom a {
+            color: #1e293b !important;
+            width: 36px !important;
+            height: 36px !important;
+            line-height: 36px !important;
+            font-size: 18px !important;
+            border-bottom: 1px solid #f1f5f9 !important;
+            background: rgba(255, 255, 255, 0.96) !important;
+        }
+        .leaflet-control-zoom a:hover {
+            background: #f8fafc !important;
+            color: #2563eb !important;
+        }
+        .leaflet-control-attribution {
+            font-size: 10px !important;
+            background: rgba(255, 255, 255, 0.8) !important;
+            backdrop-filter: blur(4px);
+            border-top-left-radius: 8px;
+            padding: 2px 6px !important;
+        }
+        /* 커스텀 핀 애니메이션 */
+        @keyframes pinBounce {
+            0% { transform: translateY(-14px) scale(0.9); opacity: 0.5; }
+            60% { transform: translateY(2px) scale(1.04); opacity: 1; }
+            100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .custom-pin-animate {
+            animation: pinBounce 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        /* 커스텀 스크롤바 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        /* 거리 측정 툴팁 라벨 스타일 */
+        .distance-mid-tooltip {
+            background: rgba(15, 23, 42, 0.92) !important;
+            color: #34d399 !important;
+            border: 1px solid rgba(52, 211, 153, 0.4) !important;
+            border-radius: 9999px !important;
+            padding: 3px 10px !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+            white-space: nowrap !important;
+        }
+        .distance-mid-tooltip::before {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="select-none">
+
+    <!-- 전체 화면 지도 영역 -->
+    <div id="map"></div>
+
+    <!-- 좌측 상단 메인 컨트롤 패널 (검색 & 선택된 좌표 카드 & 거리 측정 카드) -->
+    <div class="fixed top-4 left-4 z-[1000] w-[calc(100vw-2rem)] sm:w-[395px] max-w-full flex flex-col gap-2.5 pointer-events-none max-h-[calc(100vh-5rem)] overflow-y-auto custom-scrollbar pr-0.5">
+        
+        <!-- 1. 검색 카드 -->
+        <div class="bg-white/95 backdrop-blur-md shadow-xl rounded-2xl p-3 border border-slate-200/80 pointer-events-auto">
+            <form id="search-form" class="flex items-center gap-2">
+                <div class="relative flex-1">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </span>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        placeholder="장소, 주소 또는 위도, 경도 입력 (예: 37.5665, 126.9780)" 
+                        class="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-100/90 hover:bg-slate-100 focus:bg-white text-slate-800 placeholder-slate-400 rounded-xl border border-transparent focus:border-blue-500 focus:outline-none transition-all"
+                        autocomplete="off"
+                    />
+                </div>
+                <button 
+                    type="submit" 
+                    id="search-btn"
+                    class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition-all shrink-0 cursor-pointer"
+                >
+                    이동
+                </button>
+            </form>
+            <div id="search-status" class="hidden mt-2 text-xs text-slate-500 px-1"></div>
+        </div>
+
+        <!-- 2. 두 점 거리 측정 전용 패널 (거리 측정 모드 활성화 시 표시) -->
+        <div id="measure-card" class="hidden bg-white/95 backdrop-blur-md shadow-xl rounded-2xl p-4 border-2 border-indigo-500/80 pointer-events-auto">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex h-2.5 w-2.5 rounded-full bg-indigo-600 animate-pulse"></span>
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-indigo-700">두 점 거리 측정 (A ↔ B)</h2>
+                </div>
+                <button 
+                    type="button" 
+                    onclick="toggleMeasureMode(false)" 
+                    class="text-[11px] font-semibold text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                >
+                    측정 종료 ✕
+                </button>
+            </div>
+
+            <!-- 안내 가이드 배너 -->
+            <div id="measure-guide" class="bg-indigo-50/90 border border-indigo-200/80 text-indigo-900 text-xs font-medium px-3 py-2 rounded-xl mb-3">
+                지도에서 <strong>첫 번째 지점(A)</strong>을 클릭하세요.
+            </div>
+
+            <!-- A / B 지점 좌표 카드 -->
+            <div class="grid grid-cols-2 gap-2 mb-2.5">
+                <!-- 지점 A -->
+                <div class="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-blue-700">
+                            <span class="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center">A</span>
+                            시작점
+                        </span>
+                        <button 
+                            type="button" 
+                            id="copy-point-a-btn"
+                            onclick="copyMeasurePoint('A')" 
+                            disabled
+                            class="text-[11px] font-semibold text-blue-600 hover:text-blue-800 disabled:text-slate-300 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                            복사
+                        </button>
+                    </div>
+                    <div id="point-a-coord" class="font-mono text-xs font-bold text-slate-700 truncate">미선택</div>
+                </div>
+
+                <!-- 지점 B -->
+                <div class="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-rose-700">
+                            <span class="w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center">B</span>
+                            도착점
+                        </span>
+                        <button 
+                            type="button" 
+                            id="copy-point-b-btn"
+                            onclick="copyMeasurePoint('B')" 
+                            disabled
+                            class="text-[11px] font-semibold text-rose-600 hover:text-rose-800 disabled:text-slate-300 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                            복사
+                        </button>
+                    </div>
+                    <div id="point-b-coord" class="font-mono text-xs font-bold text-slate-700 truncate">미선택</div>
+                </div>
+            </div>
+
+            <!-- 직선 거리 결과 박스 -->
+            <div class="bg-slate-900 text-white rounded-xl p-3 mb-2.5 shadow-inner">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                        <div class="text-[10px] text-slate-400 font-medium mb-0.5">직선 거리 (Haversine)</div>
+                        <div id="measure-distance-main" class="font-mono text-base sm:text-lg font-bold text-emerald-400 truncate">0 m</div>
+                        <div id="measure-distance-sub" class="font-mono text-[11px] text-slate-300 truncate">두 지점을 선택하면 자동 계산됩니다</div>
+                    </div>
+                    <button 
+                        type="button" 
+                        id="copy-distance-btn"
+                        onclick="copyMeasuredDistance()" 
+                        disabled
+                        class="bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-500 active:scale-95 text-slate-950 font-bold text-xs px-3 py-2 rounded-lg transition-all shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                        거리 복사
+                    </button>
+                </div>
+            </div>
+
+            <!-- 하단 액션 버튼 (A·B 좌표+거리 일괄 복사 / 초기화) -->
+            <div class="flex items-center gap-2">
+                <button 
+                    type="button" 
+                    id="copy-measure-all-btn"
+                    onclick="copyMeasureSummary()" 
+                    disabled
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-semibold py-2 px-3 rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed"
+                >
+                    A·B 좌표 + 거리 복사
+                </button>
+                <button 
+                    type="button" 
+                    onclick="resetMeasurePoints(true)" 
+                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 px-3 rounded-xl transition-all cursor-pointer shrink-0"
+                >
+                    초기화
+                </button>
+            </div>
+        </div>
+
+        <!-- 3. 현재 선택된 위도·경도 카드 (일반 좌표 추출 모드에서 표시) -->
+        <div id="coord-card" class="bg-white/95 backdrop-blur-md shadow-xl rounded-2xl p-4 border border-slate-200/80 pointer-events-auto">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500"></span>
+                    <h1 class="text-xs font-bold uppercase tracking-wider text-slate-600">선택 좌표 (소수점 4자리)</h1>
+                </div>
+                <span id="location-label" class="text-[11px] font-medium text-slate-500 truncate max-w-[175px]" title="선택된 지점">서울특별시청</span>
+            </div>
+
+            <!-- 통합 좌표 표시 및 원클릭 복사 버튼 -->
+            <div class="flex items-center justify-between gap-2 bg-slate-900 text-white rounded-xl p-2.5 mb-2.5 shadow-inner">
+                <div class="flex flex-col pl-1 min-w-0">
+                    <span class="text-[10px] text-slate-400 font-medium">우클릭 시 자동 복사됨</span>
+                    <span id="combined-coord" class="font-mono text-base sm:text-lg font-bold tracking-tight text-emerald-400 truncate">37.5665, 126.9780</span>
+                </div>
+                <button 
+                    type="button" 
+                    onclick="copyCombinedCoords()"
+                    class="bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all shrink-0 shadow cursor-pointer"
+                    title="전체 좌표 복사"
+                >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    <span>복사</span>
+                </button>
+            </div>
+
+            <!-- 위도 / 경도 개별 클릭 복사 카드 -->
+            <div class="grid grid-cols-2 gap-2">
+                <button 
+                    type="button" 
+                    onclick="copySingleCoord('lat')"
+                    class="group bg-slate-50 hover:bg-blue-50/80 border border-slate-200/80 hover:border-blue-300 rounded-xl p-2.5 text-left transition-all cursor-pointer"
+                    title="클릭하여 위도만 복사"
+                >
+                    <div class="flex items-center justify-between text-[11px] text-slate-500 mb-0.5">
+                        <span>위도 (Lat)</span>
+                        <span class="text-blue-600 opacity-0 group-hover:opacity-100 font-semibold transition-opacity">복사</span>
+                    </div>
+                    <div id="lat-display" class="font-mono text-sm font-bold text-slate-800">37.5665</div>
+                </button>
+
+                <button 
+                    type="button" 
+                    onclick="copySingleCoord('lng')"
+                    class="group bg-slate-50 hover:bg-blue-50/80 border border-slate-200/80 hover:border-blue-300 rounded-xl p-2.5 text-left transition-all cursor-pointer"
+                    title="클릭하여 경도만 복사"
+                >
+                    <div class="flex items-center justify-between text-[11px] text-slate-500 mb-0.5">
+                        <span>경도 (Lng)</span>
+                        <span class="text-blue-600 opacity-0 group-hover:opacity-100 font-semibold transition-opacity">복사</span>
+                    </div>
+                    <div id="lng-display" class="font-mono text-sm font-bold text-slate-800">126.9780</div>
+                </button>
+            </div>
+
+            <!-- 하단 보조 툴바: 복사 형식 선택 & 복사 기록 토글 -->
+            <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 text-xs text-slate-500">
+                <div class="flex items-center gap-1 flex-wrap" id="format-pills">
+                    <button type="button" onclick="setCoordFormat('comma_space')" data-format="comma_space" class="format-pill bg-blue-600 text-white px-2 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer">
+                        위도, 경도
+                    </button>
+                    <button type="button" onclick="setCoordFormat('comma')" data-format="comma" class="format-pill bg-slate-100 text-slate-600 hover:bg-slate-200 px-2 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer">
+                        위도,경도
+                    </button>
+                    <button type="button" onclick="setCoordFormat('tab')" data-format="tab" class="format-pill bg-slate-100 text-slate-600 hover:bg-slate-200 px-2 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer" title="엑셀/스프레드시트 붙여넣기용 탭 구분">
+                        위도 [Tab] 경도
+                    </button>
+                </div>
+
+                <button 
+                    type="button" 
+                    onclick="toggleHistoryPanel()" 
+                    class="text-slate-600 hover:text-blue-600 font-semibold flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-slate-100 transition-all shrink-0 cursor-pointer"
+                >
+                    <span>기록</span>
+                    <span id="history-count" class="bg-slate-200 text-slate-700 text-[10px] font-bold px-1.5 py-0.2 rounded-full">0</span>
+                </button>
+            </div>
+
+            <!-- 접이식 최근 복사 기록 패널 -->
+            <div id="history-panel" class="hidden mt-2.5 pt-2.5 border-t border-slate-100">
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[11px] font-semibold text-slate-500">최근 우클릭 복사 목록</span>
+                    <button type="button" onclick="clearHistory()" class="text-[11px] text-rose-500 hover:text-rose-600 font-medium cursor-pointer">전체 삭제</button>
+                </div>
+                <div id="history-list" class="max-h-36 overflow-y-auto custom-scrollbar flex flex-col gap-1">
+                    <div class="text-xs text-slate-400 text-center py-3">지도를 마우스 오른쪽 클릭하면 기록됩니다.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 우측 상단 지도 레이어 & 거리 측정 토글 & 유틸리티 컨트롤 -->
+    <div class="fixed top-4 right-4 z-[1000] flex flex-col gap-2 items-end pointer-events-none">
+        <!-- 지도 스타일 스위처 (기본: OpenStreetMap.HOT) -->
+        <div class="bg-white/95 backdrop-blur-md shadow-lg rounded-2xl p-1.5 border border-slate-200/80 flex gap-1 pointer-events-auto">
+            <button type="button" onclick="setMapLayer('hot')" id="layer-hot" class="layer-btn bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
+                OpenStreetMap.HOT
+            </button>
+            <button type="button" onclick="setMapLayer('osm')" id="layer-osm" class="layer-btn text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
+                OSM 기본
+            </button>
+            <button type="button" onclick="setMapLayer('satellite')" id="layer-satellite" class="layer-btn text-slate-600 hover:bg-slate-100 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer">
+                위성 지도
+            </button>
+        </div>
+
+        <!-- 거리 측정 토글 버튼 & 현재 위치 이동 버튼 -->
+        <div class="flex items-center gap-1.5 pointer-events-auto">
+            <button 
+                type="button" 
+                id="measure-toggle-btn"
+                onclick="toggleMeasureMode()" 
+                class="bg-white/95 hover:bg-indigo-50 backdrop-blur-md shadow-lg rounded-xl px-3.5 py-2.5 border border-slate-200/80 text-slate-700 hover:text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="지도 위 두 지점을 찍어 직선 거리 측정"
+            >
+                <svg class="w-4 h-4 text-indigo-600" id="measure-toggle-icon" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M14 7h7v7"/>
+                </svg>
+                <span id="measure-toggle-label">거리 측정</span>
+            </button>
+
+            <button 
+                type="button" 
+                onclick="locateUser()" 
+                class="bg-white/95 hover:bg-white backdrop-blur-md shadow-lg rounded-xl p-2.5 border border-slate-200/80 text-slate-700 hover:text-blue-600 transition-all cursor-pointer"
+                title="내 현재 위치로 이동"
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- 타일 로딩 상태 배지 (지연/오류 시 자동 표시) -->
+        <div id="tile-status-badge" class="hidden bg-amber-50/95 border border-amber-300 text-amber-800 text-[11px] font-medium px-3 py-1.5 rounded-xl shadow pointer-events-auto">
+            타일 서버 응답 지연 중 — 상단에서 다른 지도로 전환할 수 있습니다.
+        </div>
+    </div>
+
+    <!-- 하단 중앙 실시간 마우스 커서 좌표 & 모드별 안내 바 -->
+    <div class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900/90 backdrop-blur-md text-white text-xs px-4 py-2 rounded-full shadow-lg flex items-center gap-3 pointer-events-none max-w-[92vw] whitespace-nowrap">
+        <div class="flex items-center gap-1.5">
+            <span class="text-slate-400">커서:</span>
+            <span id="cursor-coord" class="font-mono font-semibold text-emerald-400">37.5665, 126.9780</span>
+        </div>
+        <span class="text-slate-600 hidden sm:inline">|</span>
+        <span id="bottom-hint-text" class="text-slate-200 hidden sm:inline">지도 위 원하는 곳을 <strong class="text-white">마우스 오른쪽 클릭</strong>하면 소수점 4자리 좌표가 즉시 복사됩니다</span>
+    </div>
+
+    <!-- 복사 완료 토스트 알림 (Toast Notification) -->
+    <div id="toast" class="fixed top-20 left-1/2 -translate-x-1/2 z-[2000] pointer-events-none opacity-0 -translate-y-3 transition-all duration-200">
+        <div class="bg-slate-900/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-2.5 text-xs sm:text-sm font-semibold">
+            <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-slate-950 shrink-0">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                </svg>
+            </span>
+            <span id="toast-message">복사 완료: 37.5665, 126.9780</span>
+        </div>
+    </div>
+
+    <!-- 샌드박스 iframe 환경 호환 클립보드 복사 헬퍼 -->
+    <textarea id="clipboard-helper" aria-hidden="true" tabindex="-1" style="position:fixed;top:-9999px;left:-9999px;opacity:0;"></textarea>
+
+    <!-- Leaflet JS (unpkg 기본 + cdnjs 자동 폴백 로더) -->
+    <script>
+        (function loadLeafletAndBoot() {
+            function startApp() {
+                if (typeof window.L === 'undefined') {
+                    return;
+                }
+                initCoordinateMapApp();
+            }
+
+            const primaryScript = document.createElement('script');
+            primaryScript.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            primaryScript.crossOrigin = '';
+            primaryScript.onload = startApp;
+            primaryScript.onerror = function() {
+                const fallbackScript = document.createElement('script');
+                fallbackScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+                fallbackScript.crossOrigin = '';
+                fallbackScript.onload = startApp;
+                document.head.appendChild(fallbackScript);
+            };
+            document.head.appendChild(primaryScript);
+        })();
+
+        function initCoordinateMapApp() {
+            // ==========================================
+            // 1. 안전한 스토리지 헬퍼 (샌드박스 SecurityError 방지)
+            // ==========================================
+            const memoryStorage = {};
+            const safeStorage = {
+                getItem: function(key) {
+                    try {
+                        return window.localStorage.getItem(key);
+                    } catch (e) {
+                        return Object.prototype.hasOwnProperty.call(memoryStorage, key) ? memoryStorage[key] : null;
+                    }
+                },
+                setItem: function(key, value) {
+                    memoryStorage[key] = String(value);
+                    try {
+                        window.localStorage.setItem(key, String(value));
+                    } catch (e) {
+                        // 제한된 iframe 환경에서는 메모리 저장소만 사용
+                    }
+                }
+            };
+
+            // ==========================================
+            // 2. 상태 변수 초기화
+            // ==========================================
+            let currentLat = 37.5665; // 서울특별시청 기본 위도
+            let currentLng = 126.9780; // 서울특별시청 기본 경도
+            let currentFormat = 'comma_space';
+            let copyHistory = [];
+            let toastTimeout = null;
+            let tileErrorCount = 0;
+
+            // 거리 측정 모드 상태
+            let isMeasureMode = false;
+            let measurePointA = null; // L.LatLng
+            let measurePointB = null; // L.LatLng
+            let measureMarkerA = null;
+            let measureMarkerB = null;
+            let measureLine = null;
+            let measurePreviewLine = null;
+            let measureMidTooltip = null;
+
+            try {
+                const savedHistory = safeStorage.getItem('osm_hot_coord_history');
+                if (savedHistory) {
+                    const parsed = JSON.parse(savedHistory);
+                    if (Array.isArray(parsed)) {
+                        copyHistory = parsed;
+                    }
+                }
+            } catch (e) {
+                copyHistory = [];
+            }
+
+            // ==========================================
+            // 3. Leaflet 지도 및 타일 레이어 초기화
+            // ==========================================
+            const map = L.map('map', {
+                center: [currentLat, currentLng],
+                zoom: 13,
+                zoomControl: false
+            });
+
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            // 타일 레이어 정의 (crossOrigin: false로 설정하여 CORS 헤더 미지원 타일 서버 오류 방지)
+            const tileLayers = {
+                hot: L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    subdomains: 'abc',
+                    crossOrigin: false,
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors, Tiles style by <a href="https://www.hotosm.org/" target="_blank">HOT</a>'
+                }),
+                osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    subdomains: 'abc',
+                    crossOrigin: false,
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+                }),
+                satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19,
+                    crossOrigin: false,
+                    attribution: '&copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                })
+            };
+
+            // 타일 로딩 오류 감지 및 상태 표시
+            Object.keys(tileLayers).forEach(function(key) {
+                tileLayers[key].on('tileerror', function() {
+                    tileErrorCount++;
+                    if (tileErrorCount >= 4) {
+                        const badge = document.getElementById('tile-status-badge');
+                        if (badge) badge.classList.remove('hidden');
+                    }
+                });
+                tileLayers[key].on('load', function() {
+                    tileErrorCount = 0;
+                    const badge = document.getElementById('tile-status-badge');
+                    if (badge) badge.classList.add('hidden');
+                });
+            });
+
+            let activeLayer = tileLayers.hot;
+            activeLayer.addTo(map);
+
+            // 컨테이너 크기 재계산 (iframe/리사이즈 빈 화면 방지)
+            function refreshMapSize() {
+                if (map) {
+                    map.invalidateSize({ pan: false });
+                }
+            }
+            requestAnimationFrame(refreshMapSize);
+            setTimeout(refreshMapSize, 150);
+            setTimeout(refreshMapSize, 500);
+            window.addEventListener('resize', refreshMapSize);
+
+            if (typeof ResizeObserver !== 'undefined') {
+                const mapEl = document.getElementById('map');
+                if (mapEl) {
+                    const ro = new ResizeObserver(refreshMapSize);
+                    ro.observe(mapEl);
+                }
+            }
+
+            // 지도 레이어 전환 함수
+            window.setMapLayer = function(type) {
+                if (!tileLayers[type]) return;
+                tileErrorCount = 0;
+                const badge = document.getElementById('tile-status-badge');
+                if (badge) badge.classList.add('hidden');
+
+                if (activeLayer) {
+                    map.removeLayer(activeLayer);
+                }
+                activeLayer = tileLayers[type];
+                activeLayer.addTo(map);
+                refreshMapSize();
+
+                document.querySelectorAll('.layer-btn').forEach(function(btn) {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('text-slate-600', 'hover:bg-slate-100');
+                });
+                const selectedBtn = document.getElementById('layer-' + type);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('bg-blue-600', 'text-white');
+                    selectedBtn.classList.remove('text-slate-600', 'hover:bg-slate-100');
+                }
+            };
+
+            // ==========================================
+            // 4. 커스텀 SVG 핀 마커 설정 (기본 핀 & A/B 측정 핀)
+            // ==========================================
+            function createPinIcon() {
+                return L.divIcon({
+                    className: 'custom-map-pin',
+                    html: '<div class="custom-pin-animate" style="width:36px;height:44px;margin-left:-18px;margin-top:-44px;filter:drop-shadow(0 6px 8px rgba(15,23,42,0.35));">' +
+                          '<svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+                          '<path d="M18 0C8.05887 0 0 8.05887 0 18C0 30.5 18 44 18 44C18 44 36 30.5 36 18C36 8.05887 27.9411 0 18 0Z" fill="#E11D48"/>' +
+                          '<circle cx="18" cy="17.5" r="7.5" fill="white"/>' +
+                          '<circle cx="18" cy="17.5" r="3.5" fill="#E11D48"/>' +
+                          '</svg></div>',
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0]
+                });
+            }
+
+            function createMeasurePinIcon(label, bgColor) {
+                return L.divIcon({
+                    className: 'custom-measure-pin',
+                    html: '<div class="custom-pin-animate" style="width:36px;height:44px;margin-left:-18px;margin-top:-44px;filter:drop-shadow(0 6px 10px rgba(15,23,42,0.38));">' +
+                          '<svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+                          '<path d="M18 0C8.05887 0 0 8.05887 0 18C0 30.5 18 44 18 44C18 44 36 30.5 36 18C36 8.05887 27.9411 0 18 0Z" fill="' + bgColor + '"/>' +
+                          '<circle cx="18" cy="17.5" r="9.5" fill="white"/>' +
+                          '<text x="18" y="21.5" text-anchor="middle" fill="' + bgColor + '" font-family="Inter, sans-serif" font-size="12" font-weight="800">' + label + '</text>' +
+                          '</svg></div>',
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0]
+                });
+            }
+
+            const marker = L.marker([currentLat, currentLng], {
+                icon: createPinIcon(),
+                draggable: true
+            }).addTo(map);
+
+            marker.on('dragend', function(e) {
+                if (isMeasureMode) return;
+                const pos = e.target.getLatLng();
+                updateSelectedCoordinates(pos.lat, pos.lng, true);
+            });
+
+            // ==========================================
+            // 5. 두 점(A·B) 거리 측정 모드 로직
+            // ==========================================
+            function formatDistanceLabel(meters) {
+                if (meters >= 1000) {
+                    const km = (meters / 1000).toFixed(2);
+                    const mRounded = Math.round(meters).toLocaleString('ko-KR');
+                    return {
+                        primary: km + ' km (' + mRounded + ' m)',
+                        short: km + ' km',
+                        metersRounded: mRounded + ' m'
+                    };
+                }
+                const mFixed = meters >= 100 ? Math.round(meters).toLocaleString('ko-KR') : meters.toFixed(1);
+                const kmSub = (meters / 1000).toFixed(3);
+                return {
+                    primary: mFixed + ' m (' + kmSub + ' km)',
+                    short: mFixed + ' m',
+                    metersRounded: mFixed + ' m'
+                };
+            }
+
+            function clearMeasureLayers() {
+                if (measureMarkerA) { map.removeLayer(measureMarkerA); measureMarkerA = null; }
+                if (measureMarkerB) { map.removeLayer(measureMarkerB); measureMarkerB = null; }
+                if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+                if (measurePreviewLine) { map.removeLayer(measurePreviewLine); measurePreviewLine = null; }
+                if (measureMidTooltip) { map.removeLayer(measureMidTooltip); measureMidTooltip = null; }
+            }
+
+            window.resetMeasurePoints = function(keepMode) {
+                measurePointA = null;
+                measurePointB = null;
+                clearMeasureLayers();
+
+                document.getElementById('point-a-coord').textContent = '미선택';
+                document.getElementById('point-b-coord').textContent = '미선택';
+                document.getElementById('measure-distance-main').textContent = '0 m';
+                document.getElementById('measure-distance-sub').textContent = '두 지점을 선택하면 자동 계산됩니다';
+
+                document.getElementById('copy-point-a-btn').disabled = true;
+                document.getElementById('copy-point-b-btn').disabled = true;
+                document.getElementById('copy-distance-btn').disabled = true;
+                document.getElementById('copy-measure-all-btn').disabled = true;
+
+                const guideEl = document.getElementById('measure-guide');
+                if (guideEl) {
+                    guideEl.innerHTML = '지도에서 <strong>첫 번째 지점(A)</strong>을 클릭하세요.';
+                }
+                if (keepMode) {
+                    showToast('측정 지점이 초기화되었습니다.');
+                }
+            };
+
+            function renderFinalMeasurement() {
+                if (!measurePointA || !measurePointB) return;
+
+                if (measurePreviewLine) {
+                    map.removeLayer(measurePreviewLine);
+                    measurePreviewLine = null;
+                }
+                if (measureLine) {
+                    map.removeLayer(measureLine);
+                }
+                if (measureMidTooltip) {
+                    map.removeLayer(measureMidTooltip);
+                }
+
+                measureLine = L.polyline([measurePointA, measurePointB], {
+                    color: '#4f46e5',
+                    weight: 4,
+                    opacity: 0.92,
+                    dashArray: '8, 6'
+                }).addTo(map);
+
+                const distMeters = map.distance(measurePointA, measurePointB);
+                const distInfo = formatDistanceLabel(distMeters);
+
+                // 두 점의 중간 위치에 거리 배지 툴팁 표시
+                const midLat = (measurePointA.lat + measurePointB.lat) / 2;
+                const midLng = (measurePointA.lng + measurePointB.lng) / 2;
+
+                measureMidTooltip = L.tooltip({
+                    permanent: true,
+                    direction: 'center',
+                    className: 'distance-mid-tooltip'
+                })
+                .setLatLng([midLat, midLng])
+                .setContent(distInfo.short)
+                .addTo(map);
+
+                document.getElementById('measure-distance-main').textContent = distInfo.primary;
+                document.getElementById('measure-distance-sub').textContent =
+                    'A(' + formatCoord(measurePointA.lat) + ', ' + formatCoord(measurePointA.lng) + ') → B(' +
+                    formatCoord(measurePointB.lat) + ', ' + formatCoord(measurePointB.lng) + ')';
+
+                document.getElementById('copy-distance-btn').disabled = false;
+                document.getElementById('copy-measure-all-btn').disabled = false;
+
+                const guideEl = document.getElementById('measure-guide');
+                if (guideEl) {
+                    guideEl.innerHTML = '측정 완료! <strong>마커를 드래그</strong>해 미세 조정하거나, <strong>새 지점을 클릭</strong>해 다시 측정하세요.';
+                }
+            }
+
+            function handleMeasureClick(latlng) {
+                // 1) A가 없거나, 이미 A와 B가 모두 찍힌 상태에서 세 번째 클릭 시 -> 새로운 A 지점으로 시작
+                if (!measurePointA || (measurePointA && measurePointB)) {
+                    measurePointA = latlng;
+                    measurePointB = null;
+                    clearMeasureLayers();
+
+                    measureMarkerA = L.marker(measurePointA, {
+                        icon: createMeasurePinIcon('A', '#2563eb'),
+                        draggable: true
+                    }).addTo(map);
+
+                    measureMarkerA.on('drag', function(e) {
+                        measurePointA = e.target.getLatLng();
+                        document.getElementById('point-a-coord').textContent =
+                            formatCoord(measurePointA.lat) + ', ' + formatCoord(measurePointA.lng);
+                        if (measurePointB) {
+                            renderFinalMeasurement();
+                        }
+                    });
+
+                    const aStr = formatCoord(measurePointA.lat) + ', ' + formatCoord(measurePointA.lng);
+                    document.getElementById('point-a-coord').textContent = aStr;
+                    document.getElementById('point-b-coord').textContent = '두 번째 지점 선택 대기...';
+                    document.getElementById('copy-point-a-btn').disabled = false;
+                    document.getElementById('copy-point-b-btn').disabled = true;
+                    document.getElementById('copy-distance-btn').disabled = true;
+                    document.getElementById('copy-measure-all-btn').disabled = true;
+                    document.getElementById('measure-distance-main').textContent = '0 m';
+                    document.getElementById('measure-distance-sub').textContent = '두 번째 지점(B)을 클릭하세요';
+
+                    const guideEl = document.getElementById('measure-guide');
+                    if (guideEl) {
+                        guideEl.innerHTML = '이제 지도에서 <strong>두 번째 지점(B)</strong>을 클릭하세요.';
+                    }
+                    return;
+                }
+
+                // 2) A만 찍힌 상태에서 두 번째 클릭 -> B 지점 확정 및 거리 계산
+                measurePointB = latlng;
+                measureMarkerB = L.marker(measurePointB, {
+                    icon: createMeasurePinIcon('B', '#e11d48'),
+                    draggable: true
+                }).addTo(map);
+
+                measureMarkerB.on('drag', function(e) {
+                    measurePointB = e.target.getLatLng();
+                    document.getElementById('point-b-coord').textContent =
+                        formatCoord(measurePointB.lat) + ', ' + formatCoord(measurePointB.lng);
+                    renderFinalMeasurement();
+                });
+
+                const bStr = formatCoord(measurePointB.lat) + ', ' + formatCoord(measurePointB.lng);
+                document.getElementById('point-b-coord').textContent = bStr;
+                document.getElementById('copy-point-b-btn').disabled = false;
+
+                renderFinalMeasurement();
+            }
+
+            window.toggleMeasureMode = function(forceState) {
+                isMeasureMode = typeof forceState === 'boolean' ? forceState : !isMeasureMode;
+
+                const toggleBtn = document.getElementById('measure-toggle-btn');
+                const toggleLabel = document.getElementById('measure-toggle-label');
+                const toggleIcon = document.getElementById('measure-toggle-icon');
+                const measureCard = document.getElementById('measure-card');
+                const coordCard = document.getElementById('coord-card');
+                const bottomHint = document.getElementById('bottom-hint-text');
+
+                if (isMeasureMode) {
+                    // 거리 측정 모드 활성화
+                    if (map.hasLayer(marker)) {
+                        map.removeLayer(marker);
+                    }
+                    resetMeasurePoints(false);
+
+                    measureCard.classList.remove('hidden');
+                    coordCard.classList.add('hidden');
+
+                    toggleBtn.classList.remove('bg-white/95', 'text-slate-700', 'hover:bg-indigo-50', 'hover:text-indigo-700');
+                    toggleBtn.classList.add('bg-indigo-600', 'text-white', 'border-indigo-600', 'hover:bg-indigo-700');
+                    toggleIcon.classList.remove('text-indigo-600');
+                    toggleIcon.classList.add('text-white');
+                    toggleLabel.textContent = '측정 종료';
+
+                    if (bottomHint) {
+                        bottomHint.innerHTML = '<strong class="text-indigo-300">[거리 측정 모드]</strong> 지도 위 <strong class="text-white">첫 번째 지점(A)</strong>과 <strong class="text-white">두 번째 지점(B)</strong>을 클릭하세요';
+                    }
+                    showToast('거리 측정 모드가 켜졌습니다. 두 지점을 클릭하세요.');
+                } else {
+                    // 거리 측정 모드 종료 -> 일반 좌표 추출 모드 복원
+                    clearMeasureLayers();
+                    measurePointA = null;
+                    measurePointB = null;
+
+                    if (!map.hasLayer(marker)) {
+                        marker.addTo(map);
+                    }
+
+                    measureCard.classList.add('hidden');
+                    coordCard.classList.remove('hidden');
+
+                    toggleBtn.classList.add('bg-white/95', 'text-slate-700', 'hover:bg-indigo-50', 'hover:text-indigo-700');
+                    toggleBtn.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600', 'hover:bg-indigo-700');
+                    toggleIcon.classList.add('text-indigo-600');
+                    toggleIcon.classList.remove('text-white');
+                    toggleLabel.textContent = '거리 측정';
+
+                    if (bottomHint) {
+                        bottomHint.innerHTML = '지도 위 원하는 곳을 <strong class="text-white">마우스 오른쪽 클릭</strong>하면 소수점 4자리 좌표가 즉시 복사됩니다';
+                    }
+                }
+            };
+
+            window.copyMeasurePoint = function(which) {
+                const pt = which === 'A' ? measurePointA : measurePointB;
+                if (!pt) return;
+                const formatted = getFormattedCombinedString(formatCoord(pt.lat), formatCoord(pt.lng));
+                copyTextToClipboard(formatted);
+                showToast('지점 ' + which + ' 좌표 복사: ' + formatted);
+            };
+
+            window.copyMeasuredDistance = function() {
+                if (!measurePointA || !measurePointB) return;
+                const distMeters = map.distance(measurePointA, measurePointB);
+                const distInfo = formatDistanceLabel(distMeters);
+                copyTextToClipboard(distInfo.primary);
+                showToast('거리 복사 완료: ' + distInfo.primary);
+            };
+
+            window.copyMeasureSummary = function() {
+                if (!measurePointA || !measurePointB) return;
+                const aStr = formatCoord(measurePointA.lat) + ', ' + formatCoord(measurePointA.lng);
+                const bStr = formatCoord(measurePointB.lat) + ', ' + formatCoord(measurePointB.lng);
+                const distInfo = formatDistanceLabel(map.distance(measurePointA, measurePointB));
+                const summary = 'A: ' + aStr + ' | B: ' + bStr + ' | 거리: ' + distInfo.primary;
+                copyTextToClipboard(summary);
+                showToast('A·B 좌표 및 거리 복사 완료');
+            };
+
+            // ==========================================
+            // 6. 좌표 포맷팅(소수점 4자리) 및 갱신 로직
+            // ==========================================
+            function formatCoord(num) {
+                return Number(num).toFixed(4);
+            }
+
+            function getFormattedCombinedString(latStr, lngStr) {
+                if (currentFormat === 'comma') return latStr + ',' + lngStr;
+                if (currentFormat === 'tab') return latStr + '\t' + lngStr;
+                return latStr + ', ' + lngStr;
+            }
+
+            window.setCoordFormat = function(format) {
+                currentFormat = format;
+                document.querySelectorAll('.format-pill').forEach(function(btn) {
+                    const isSelected = btn.dataset.format === format;
+                    btn.classList.toggle('bg-blue-600', isSelected);
+                    btn.classList.toggle('text-white', isSelected);
+                    btn.classList.toggle('font-semibold', isSelected);
+                    btn.classList.toggle('bg-slate-100', !isSelected);
+                    btn.classList.toggle('text-slate-600', !isSelected);
+                    btn.classList.toggle('font-medium', !isSelected);
+                });
+                updateFormatDisplay();
+            };
+
+            function updateFormatDisplay() {
+                const latStr = formatCoord(currentLat);
+                const lngStr = formatCoord(currentLng);
+                document.getElementById('combined-coord').textContent = getFormattedCombinedString(latStr, lngStr);
+            }
+
+            function updateSelectedCoordinates(lat, lng, autoCopy, customLabel) {
+                currentLat = lat;
+                currentLng = lng;
+
+                const latStr = formatCoord(lat);
+                const lngStr = formatCoord(lng);
+                const combinedStr = getFormattedCombinedString(latStr, lngStr);
+
+                marker.setLatLng([lat, lng]);
+                marker.setIcon(createPinIcon());
+
+                document.getElementById('lat-display').textContent = latStr;
+                document.getElementById('lng-display').textContent = lngStr;
+                document.getElementById('combined-coord').textContent = combinedStr;
+
+                const labelEl = document.getElementById('location-label');
+                if (customLabel) {
+                    labelEl.textContent = customLabel;
+                    labelEl.title = customLabel;
+                } else {
+                    labelEl.textContent = '지도 선택 지점';
+                    labelEl.title = latStr + ', ' + lngStr;
+                }
+
+                if (autoCopy) {
+                    copyTextToClipboard(combinedStr);
+                    const displayMsg = currentFormat === 'tab'
+                        ? '복사 완료 (탭 구분): ' + latStr + ' [Tab] ' + lngStr
+                        : '복사 완료: ' + combinedStr;
+                    showToast(displayMsg);
+                    addHistoryItem(latStr, lngStr);
+                }
+            }
+
+            // 지도 마우스 이동 시 하단 커서 좌표 실시간 표시 (+ 거리 측정 중 실시간 점선/거리 미리보기)
+            map.on('mousemove', function(e) {
+                const latStr = formatCoord(e.latlng.lat);
+                const lngStr = formatCoord(e.latlng.lng);
+                document.getElementById('cursor-coord').textContent = latStr + ', ' + lngStr;
+
+                if (isMeasureMode && measurePointA && !measurePointB) {
+                    if (!measurePreviewLine) {
+                        measurePreviewLine = L.polyline([measurePointA, e.latlng], {
+                            color: '#6366f1',
+                            weight: 3,
+                            opacity: 0.75,
+                            dashArray: '6, 6'
+                        }).addTo(map);
+                    } else {
+                        measurePreviewLine.setLatLngs([measurePointA, e.latlng]);
+                    }
+
+                    const liveMeters = map.distance(measurePointA, e.latlng);
+                    const liveInfo = formatDistanceLabel(liveMeters);
+                    document.getElementById('measure-distance-main').textContent = liveInfo.primary;
+                    document.getElementById('measure-distance-sub').textContent = '커서 위치까지의 실시간 예상 거리';
+                }
+            });
+
+            // 지도 오른쪽 클릭 (contextmenu)
+            map.on('contextmenu', function(e) {
+                if (e.originalEvent) {
+                    e.originalEvent.preventDefault();
+                    e.originalEvent.stopPropagation();
+                }
+                if (isMeasureMode) {
+                    handleMeasureClick(e.latlng);
+                    return;
+                }
+                updateSelectedCoordinates(e.latlng.lat, e.latlng.lng, true);
+            });
+
+            // 지도 왼쪽 클릭
+            map.on('click', function(e) {
+                if (isMeasureMode) {
+                    handleMeasureClick(e.latlng);
+                    return;
+                }
+                updateSelectedCoordinates(e.latlng.lat, e.latlng.lng, false);
+            });
+
+            // ==========================================
+            // 7. 샌드박스 iframe 안전 클립보드 복사 헬퍼
+            // ==========================================
+            function fallbackCopyText(text) {
+                const helper = document.getElementById('clipboard-helper');
+                if (!helper) return false;
+                helper.value = text;
+                helper.removeAttribute('readonly');
+                helper.focus();
+                helper.select();
+                helper.setSelectionRange(0, text.length);
+                let ok = false;
+                try {
+                    ok = document.execCommand('copy');
+                } catch (err) {
+                    ok = false;
+                }
+                helper.blur();
+                return ok;
+            }
+
+            function copyTextToClipboard(text) {
+                const fallbackOk = fallbackCopyText(text);
+                if (!fallbackOk && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    try {
+                        navigator.clipboard.writeText(text).catch(function() {
+                            fallbackCopyText(text);
+                        });
+                    } catch (err) {
+                        // 예외 무시
+                    }
+                }
+            }
+
+            window.copyCombinedCoords = function() {
+                const latStr = formatCoord(currentLat);
+                const lngStr = formatCoord(currentLng);
+                const combinedStr = getFormattedCombinedString(latStr, lngStr);
+                copyTextToClipboard(combinedStr);
+                const displayMsg = currentFormat === 'tab'
+                    ? '복사 완료 (탭 구분): ' + latStr + ' [Tab] ' + lngStr
+                    : '복사 완료: ' + combinedStr;
+                showToast(displayMsg);
+                addHistoryItem(latStr, lngStr);
+            };
+
+            window.copySingleCoord = function(type) {
+                const val = type === 'lat' ? formatCoord(currentLat) : formatCoord(currentLng);
+                const label = type === 'lat' ? '위도' : '경도';
+                copyTextToClipboard(val);
+                showToast(label + ' 복사 완료: ' + val);
+            };
+
+            function showToast(message) {
+                const toast = document.getElementById('toast');
+                const msgEl = document.getElementById('toast-message');
+                if (!toast || !msgEl) return;
+
+                msgEl.textContent = message;
+                toast.classList.remove('opacity-0', '-translate-y-3');
+                toast.classList.add('opacity-100', 'translate-y-0');
+
+                if (toastTimeout) clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(function() {
+                    toast.classList.remove('opacity-100', 'translate-y-0');
+                    toast.classList.add('opacity-0', '-translate-y-3');
+                }, 2200);
+            }
+
+            // ==========================================
+            // 8. 복사 기록 관리 (안전한 스토리지 사용)
+            // ==========================================
+            function addHistoryItem(latStr, lngStr) {
+                const key = latStr + ', ' + lngStr;
+                copyHistory = copyHistory.filter(function(item) {
+                    return (item.lat + ', ' + item.lng) !== key;
+                });
+
+                const now = new Date();
+                const timeStr = String(now.getHours()).padStart(2, '0') + ':' +
+                                String(now.getMinutes()).padStart(2, '0') + ':' +
+                                String(now.getSeconds()).padStart(2, '0');
+
+                copyHistory.unshift({ lat: latStr, lng: lngStr, time: timeStr });
+                if (copyHistory.length > 20) {
+                    copyHistory = copyHistory.slice(0, 20);
+                }
+
+                try {
+                    safeStorage.setItem('osm_hot_coord_history', JSON.stringify(copyHistory));
+                } catch (e) {
+                    // 무시
+                }
+                renderHistory();
+            }
+
+            function renderHistory() {
+                const countEl = document.getElementById('history-count');
+                const listEl = document.getElementById('history-list');
+                if (!countEl || !listEl) return;
+
+                countEl.textContent = String(copyHistory.length);
+
+                if (copyHistory.length === 0) {
+                    listEl.innerHTML = '<div class="text-xs text-slate-400 text-center py-3">지도를 마우스 오른쪽 클릭하면 기록됩니다.</div>';
+                    return;
+                }
+
+                listEl.innerHTML = copyHistory.map(function(item) {
+                    const formatted = getFormattedCombinedString(item.lat, item.lng);
+                    const displayLabel = currentFormat === 'tab' ? (item.lat + ' [Tab] ' + item.lng) : formatted;
+                    return '<div class="flex items-center justify-between bg-slate-50 hover:bg-blue-50/70 px-2.5 py-1.5 rounded-lg border border-slate-100 transition-colors">' +
+                           '<button type="button" onclick="jumpToHistory(' + item.lat + ', ' + item.lng + ')" class="font-mono text-xs font-semibold text-slate-700 hover:text-blue-600 text-left flex-1 truncate cursor-pointer" title="이 위치로 지도 이동 및 복사">' +
+                           displayLabel +
+                           '</button>' +
+                           '<span class="text-[10px] text-slate-400 ml-2 shrink-0">' + item.time + '</span>' +
+                           '</div>';
+                }).join('');
+            }
+
+            window.jumpToHistory = function(lat, lng) {
+                if (isMeasureMode) {
+                    toggleMeasureMode(false);
+                }
+                map.setView([lat, lng], Math.max(map.getZoom(), 14));
+                updateSelectedCoordinates(lat, lng, true, '기록에서 불러옴');
+            };
+
+            window.toggleHistoryPanel = function() {
+                const panel = document.getElementById('history-panel');
+                if (panel) {
+                    panel.classList.toggle('hidden');
+                    renderHistory();
+                }
+            };
+
+            window.clearHistory = function() {
+                copyHistory = [];
+                safeStorage.setItem('osm_hot_coord_history', '[]');
+                renderHistory();
+            };
+
+            // ==========================================
+            // 9. 장소/주소 및 좌표 직접 검색 (Nominatim)
+            // ==========================================
+            const searchForm = document.getElementById('search-form');
+            const searchInput = document.getElementById('search-input');
+            const searchStatus = document.getElementById('search-status');
+
+            searchForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const query = searchInput.value.trim();
+                if (!query) return;
+
+                // 1) "37.5665, 126.9780" 또는 "37.5665 126.9780" 직접 좌표 입력 처리
+                const coordMatch = query.match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+                if (coordMatch) {
+                    const lat = parseFloat(coordMatch[1]);
+                    const lng = parseFloat(coordMatch[2]);
+                    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                        searchStatus.classList.add('hidden');
+                        map.setView([lat, lng], 16);
+                        if (isMeasureMode) {
+                            handleMeasureClick(L.latLng(lat, lng));
+                        } else {
+                            updateSelectedCoordinates(lat, lng, true, '좌표 직접 입력');
+                        }
+                        return;
+                    }
+                }
+
+                // 2) OpenStreetMap Nominatim API 장소 검색
+                searchStatus.textContent = '장소를 검색하는 중...';
+                searchStatus.classList.remove('hidden', 'text-rose-500');
+                searchStatus.classList.add('text-slate-500');
+
+                try {
+                    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=ko&q=' + encodeURIComponent(query);
+                    const response = await fetch(url, {
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    const results = await response.json();
+
+                    if (results && results.length > 0) {
+                        const place = results[0];
+                        const lat = parseFloat(place.lat);
+                        const lng = parseFloat(place.lon);
+                        const shortName = place.display_name ? place.display_name.split(',')[0] : query;
+
+                        searchStatus.classList.add('hidden');
+                        map.setView([lat, lng], 16);
+                        if (isMeasureMode) {
+                            handleMeasureClick(L.latLng(lat, lng));
+                        } else {
+                            updateSelectedCoordinates(lat, lng, false, shortName);
+                        }
+                    } else {
+                        searchStatus.textContent = '검색 결과가 없습니다. 다른 지명이나 도로명 주소를 입력해 보세요.';
+                        searchStatus.classList.remove('text-slate-500');
+                        searchStatus.classList.add('text-rose-500');
+                    }
+                } catch (err) {
+                    searchStatus.textContent = '검색 연결에 실패했습니다. 잠시 후 다시 시도하거나 직접 좌표를 입력해 주세요.';
+                    searchStatus.classList.remove('text-slate-500');
+                    searchStatus.classList.add('text-rose-500');
+                }
+            });
+
+            // ==========================================
+            // 10. 내 현재 위치 이동
+            // ==========================================
+            window.locateUser = function() {
+                if (!navigator.geolocation) {
+                    showToast('이 브라우저에서는 위치 조회를 지원하지 않습니다.');
+                    return;
+                }
+                showToast('현재 위치를 확인하는 중...');
+                navigator.geolocation.getCurrentPosition(
+                    function(pos) {
+                        const lat = pos.coords.latitude;
+                        const lng = pos.coords.longitude;
+                        map.setView([lat, lng], 16);
+                        if (isMeasureMode) {
+                            handleMeasureClick(L.latLng(lat, lng));
+                        } else {
+                            updateSelectedCoordinates(lat, lng, true, '내 현재 위치');
+                        }
+                    },
+                    function() {
+                        showToast('위치 권한이 차단되었거나 확인할 수 없습니다.');
+                    },
+                    { enableHighAccuracy: true, timeout: 8000 }
+                );
+            };
+
+            // 초기 렌더링 완료 처리
+            renderHistory();
+            updateSelectedCoordinates(currentLat, currentLng, false, '서울특별시청');
+        }
+    </script>
+</body>
+</html>
